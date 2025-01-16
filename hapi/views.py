@@ -24,7 +24,9 @@ def make_request(url, method, body=None, params=None, headers=None):
 class PatientCreateAPIView(ListCreateAPIView):
 
     def create(self, request, *args, **kwargs):
+        breakpoint()
         data = json.loads(request.body.decode("utf-8"))
+        breakpoint()
         body_frame = {
                 "resourceType": "Patient",
                 "name": [
@@ -80,9 +82,9 @@ class PatientsAPIView(ListCreateAPIView):
         pid = kwargs.get("pid")
         try:
             if pid:
-                url = "" + str(pid)
+                url = BASE_URL + "Patient/" + str(pid)
                 resp = make_request(url, "GET")
-                return Response(data=resp.json(), status=status.HTTP_400_BAD_REQUEST)
+                return Response(data=resp.json(), status=status.HTTP_200_OK)
             patients = Patient.objects.all()
             data = []
             for patient in patients:
@@ -170,10 +172,98 @@ class OrganisationAPIView(ListCreateAPIView):
             return Response(data=False, status=status.HTTP_400_BAD_REQUEST)
 
 
+class NPIGetCreateAPIView(ListCreateAPIView):
+
+    def list(self, request, *args, **kwargs):
+        pid = kwargs.get("pid")
+        try:
+            if pid:
+                url = BASE_URL + "Practitioner/" + pid
+                resp = make_request(url, "GET")
+                return Response(data=resp.json(), status=status.HTTP_400_BAD_REQUEST)
+            npi_data = NPIPractitioner.objects.all()
+            data = []
+            for npi in npi_data:
+                url = BASE_URL + "Practitioner/"+ str(npi.epic_npi_id)
+                resp = make_request(url, "GET")
+                data.append(resp.json())
+            return Response(data=data, status=status.HTTP_200_OK)
+        except Exception as e:
+            print("@@@@@@@@@@@@@@@: ", e)
+            return Response(data=False, status=status.HTTP_400_BAD_REQUEST)
+
+    def create(self, request, *args, **kwargs):
+        data = json.loads(request.body.decode("utf-8"))
+        payload = {
+            "resourceType": "Practitioner",
+            "identifier": [
+                {
+                    "system": "http://hl7.org/fhir/sid/us-npi",
+                    "value": "1234567893"
+                }
+            ],
+            "active": True,
+            "name": [
+                {
+                    "use": "official",
+                    "family": data["family_name"],
+                    "given": [data["npi_name"]]
+                }
+            ],
+            "telecom": [
+                {
+                    "system": "phone",
+                    "value": data["mobile"],
+                    "use": "work"
+                }
+            ],
+            "address": [
+                {
+                    "use": "work",
+                    "line": [data["address1"]],
+                    "city": data["city"],
+                    "state": data["state"],
+                    "postalCode": data["pincode"]
+                }
+            ]
+        }
+
+        url = BASE_URL + "Practitioner"
+        header = {}
+        header["content-Type"] = "application/json"
+        try:
+            resp = make_request(url, "POST", body=json.dumps(payload), headers=header)
+            breakpoint()
+            if resp.status_code == 201:
+                result = resp.json()
+                NPIPractitioner.objects.create(epic_npi_id=result["id"], epic_response=result, **data)
+                return Response(data=result, status=status.HTTP_201_CREATED)
+            else:
+                return Response(data=resp.json(), status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            print("@@@@@@@@@@@@@@@: ", e)
+            return Response(data=False, status=status.HTTP_400_BAD_REQUEST)
+
+
 class CoverageAPIView(ListCreateAPIView):
 
     def list(self, request, *args, **kwargs):
-        pass
+        pid = kwargs.get("pid")
+        try:
+            if pid:
+                url = BASE_URL + "Coverage/" + pid
+                resp = make_request(url, "GET")
+                return Response(data=resp.json(), status=status.HTTP_400_BAD_REQUEST)
+            npi_data = Coverage.objects.all()
+            data = []
+            for npi in npi_data:
+                url = BASE_URL + "Coverage/" + str(npi.epic_resp_id)
+                resp = make_request(url, "GET")
+                data.append(resp.json())
+            return Response(data=data, status=status.HTTP_200_OK)
+        except Exception as e:
+            print("@@@@@@@@@@@@@@@: ", e)
+            return Response(data=False, status=status.HTTP_400_BAD_REQUEST)
 
     def create(self, request, *args, **kwargs):
         data = json.loads(request.body.decode("utf-8"))
@@ -244,4 +334,114 @@ class CoverageAPIView(ListCreateAPIView):
             return Response(data=False, status=status.HTTP_400_BAD_REQUEST)
 
 class ClaimAPIView(ListCreateAPIView):
-    pass
+
+    def create(self, request, *args, **kwargs):
+        coverage_id = kwargs["coverage_id"]
+        try:
+            coverage = Coverage.objects.get(epic_resp_id=coverage_id)
+        except Exception as err:
+            return
+        data = json.loads(request.body.decode("utf-8"))
+        patient_id = coverage.patient_id.epic_pid
+        org_id = coverage.org_id.epic_resp_id
+        npi = coverage.patient_id.npi.epic_npi_id
+        coverage_id = coverage_id
+        payload = {
+            "resourceType": "Claim",
+            "identifier": [
+                {
+                    "system": "http://example.org/claim-ids",
+                    "value": "claim12345"
+                }
+            ],
+            "status": "active",
+            "type": {
+                "coding": [
+                    {
+                        "system": "http://terminology.hl7.org/CodeSystem/claim-type",
+                        "code": data["claim_type"]
+                    }
+                ]
+            },
+            "use": "claim",
+            "patient": {
+                "reference": f"Patient/{patient_id}"
+            },
+            "created": "2025-01-13",
+            "insurer": {
+                "reference": f"Organization/{org_id}"
+            },
+            "provider": {
+                "reference": f"Practitioner/{npi}"
+            },
+            "priority": {
+                "coding": [
+                    {
+                        "system": "http://terminology.hl7.org/CodeSystem/processpriority",
+                        "code": "normal"
+                    }
+                ]
+            },
+            "payee": {
+                "type": {
+                    "coding": [
+                        {
+                            "system": "http://terminology.hl7.org/CodeSystem/payeetype",
+                            "code": "provider"
+                        }
+                    ]
+                }
+            },
+            "coverage": [
+                {
+                    "sequence": 1,
+                    "focal": True,
+                    "coverage": {
+                        "reference": f"Coverage/{coverage_id}"
+                    }
+                }
+            ],
+            "item": [
+                {
+                    "sequence": 1,
+                    "productOrService": {
+                        "coding": [
+                            {
+                                "system": "http://example.org/codes/services",
+                                "code": "exam"
+                            }
+                        ]
+                    },
+                    "unitPrice": {
+                        "value": data["unit_price"],
+                        "currency": data["currency"]
+                    },
+                    "net": {
+                        "value": data["net_amount"],
+                        "currency": data["currency"]
+                    }
+                }
+            ],
+            "total": {
+                "value": data["claim_amount"],
+                "currency": data["currency"]
+            }
+        }
+
+        url = BASE_URL + "Claim"
+        header = {}
+        header["content-Type"] = "application/json"
+        try:
+            resp = make_request(url, "POST", body=json.dumps(payload), headers=header)
+            if resp.status_code == 201:
+                result = resp.json()
+                Claims.objects.create(epic_resp_id=result["id"], epic_response=result,
+                                        patient_id=coverage.patient_id,
+                                        org_id=coverage.org_id, npi_id=coverage.patient_id.npi, **data)
+                return Response(data=result, status=status.HTTP_201_CREATED)
+            else:
+                return Response(data=resp.json(), status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            print("@@@@@@@@@@@@@@@: ", e)
+            return Response(data=False, status=status.HTTP_400_BAD_REQUEST)
+
